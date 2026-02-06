@@ -726,7 +726,7 @@ func (m model) View() string {
 	// Row = 5 (│ borders) + nameW + shaW + statusW + deployW + 1 (scrollbar) = m.width
 	statusW := 14
 	deployW := 15
-	shaW := 16
+	shaW := 14
 	nameW := m.width - statusW - deployW - shaW - 6
 	if nameW < 20 {
 		nameW = 20
