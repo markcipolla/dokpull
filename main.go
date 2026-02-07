@@ -450,9 +450,6 @@ func (m model) formatImageStatus(img ImageInfo) string {
 
 func formatSHA(img ImageInfo) string {
 	if img.PullStatus == StatusComplete && img.NewSHA != "" {
-		if img.OldSHA != "" && img.OldSHA != img.NewSHA {
-			return img.OldSHA + "→" + img.NewSHA
-		}
 		return img.NewSHA
 	}
 	if img.OldSHA != "" {
