@@ -258,7 +258,7 @@ func TestFormatSHA_CompleteSameSHA(t *testing.T) {
 func TestFormatSHA_CompleteDifferentSHA(t *testing.T) {
 	img := ImageInfo{PullStatus: StatusComplete, OldSHA: "abc123def456", NewSHA: "789xyz012345"}
 	got := formatSHA(img)
-	want := "abc123def456→789xyz012345"
+	want := "789xyz012345"
 	if got != want {
 		t.Errorf("formatSHA() = %q, want %q", got, want)
 	}

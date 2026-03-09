@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -230,6 +231,26 @@ func loadServices() tea.Msg {
 		return servicesLoadedMsg{err: fmt.Errorf("no services found in Dokploy")}
 	}
 
+	// Fetch appName for compose services that don't have one
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for i := range services {
+		if services[i].AppName != "" {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			appName := fetchComposeAppName(services[idx].ComposeID)
+			if appName != "" {
+				mu.Lock()
+				services[idx].AppName = appName
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+
 	// Get running container images and match to services
 	cmd := exec.Command("docker", "ps", "--format", "{{.Names}}\t{{.Label \"com.docker.compose.project\"}}\t{{.ID}}")
 	out, err := cmd.Output()
@@ -308,6 +329,32 @@ func resolveImageSHA(image string) string {
 		return sha
 	}
 	return ""
+}
+
+// fetchComposeAppName gets the appName for a compose service from the Dokploy API.
+func fetchComposeAppName(composeID string) string {
+	req, err := http.NewRequest("GET", dokployURL+"/api/compose.one?composeId="+composeID, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("x-api-key", dokployAPIKey)
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var result struct {
+		AppName string `json:"appName"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
+	return result.AppName
 }
 
 func pullImage(serviceIdx, imageIdx int, imageName string) tea.Cmd {
