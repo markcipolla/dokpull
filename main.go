@@ -234,12 +234,10 @@ func loadServices() tea.Msg {
 	// Fetch appName for compose services that don't have one
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	needFetch := 0
 	for i := range services {
 		if services[i].AppName != "" {
 			continue
 		}
-		needFetch++
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -253,14 +251,6 @@ func loadServices() tea.Msg {
 	}
 	wg.Wait()
 
-	// Debug: count how many services got appNames
-	matched := 0
-	for _, svc := range services {
-		if svc.AppName != "" {
-			matched++
-		}
-	}
-	fmt.Fprintf(os.Stderr, "debug: %d services, %d needed appName fetch, %d have appName now\n", len(services), needFetch, matched)
 
 	// Get running container images and match to services
 	cmd := exec.Command("docker", "ps", "--format", "{{.Names}}\t{{.Label \"com.docker.compose.project\"}}\t{{.ID}}")
