@@ -1,4 +1,4 @@
-module dokpull
+module github.com/markcipolla/dokpull
 
 go 1.25.3
 
