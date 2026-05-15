@@ -1,0 +1,9 @@
+# Compiled binary
+/dokpull
+
+# Test binaries
+*.test
+*.out
+
+# Coverage
+coverage.txt
