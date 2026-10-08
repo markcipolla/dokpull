@@ -19,7 +19,8 @@ Single-file Go application (`main.go`, ~596 lines) using the **Bubble Tea** MVU 
 1. **Loading** - Loads local Docker images via `docker images` and fetches Dokploy apps via API
 2. **Pulling** - Pulls all images concurrently (up to 3 at a time), tracking progress
 3. **Deploying** - Matches updated images to Dokploy apps and triggers redeployments via API
-4. **Done** - Displays summary of updates and deployments
+4. **Done** - Displays summary of updates and deployments, and waits for `q`
+   (or exits immediately under `--headless`)
 
 ### Key Types
 
@@ -32,6 +33,10 @@ Single-file Go application (`main.go`, ~596 lines) using the **Bubble Tea** MVU 
 - **`DOKPLOY_URL`** - Dokploy instance URL (env var)
 - **`DOKPLOY_API_KEY`** - Dokploy API key (env var)
 - **`--deploy-all`** - CLI flag to redeploy all apps regardless of image updates
+- **`--headless`** - CLI flag for unattended runs (cron/systemd): swaps the TUI
+  for `tea.WithoutRenderer()` + `tea.WithInput(nil)` so no TTY is needed, quits
+  via `quitWhenDone` the moment `phase` reaches `"done"` instead of waiting on
+  `q`, and reports through `reportHeadless` with a non-zero exit on failure
 
 ## Building
 

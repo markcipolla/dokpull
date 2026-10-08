@@ -87,6 +87,7 @@ type model struct {
 	phase        string // "loading", "pulling", "deploying", "done"
 	err          error
 	deployAll    bool
+	headless     bool
 	width        int
 	height       int
 	scrollOffset int
@@ -607,7 +608,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.phase = "done"
-			return m, nil
+			return m, tea.Batch(m.quitWhenDone(nil)...)
 		}
 		m.services = msg.services
 		if len(m.services) > 0 && m.phase == "loading" {
@@ -705,7 +706,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = "done"
 	}
 
-	return m, tea.Batch(cmds...)
+	return m, tea.Batch(m.quitWhenDone(cmds)...)
+}
+
+// quitWhenDone exits a headless run the moment the phase reaches "done".
+// Interactively the done screen is useful — it is where you read the SHA
+// changes and press Enter to redeploy something by hand — but under cron
+// there is nobody to press `q`, so it would hang until something kills the
+// process. Appending here rather than at each `m.phase = "done"` site covers
+// every way we can finish, including the load-error path.
+func (m model) quitWhenDone(cmds []tea.Cmd) []tea.Cmd {
+	if m.headless && m.phase == "done" {
+		return append(cmds, tea.Quit)
+	}
+	return cmds
 }
 
 func (m model) startDeploys() tea.Cmd {
@@ -1085,9 +1099,13 @@ func (m model) renderStatusBar() string {
 
 func main() {
 	deployAll := false
+	headless := false
 	for _, arg := range os.Args[1:] {
 		if arg == "--deploy-all" {
 			deployAll = true
+		}
+		if arg == "--headless" {
+			headless = true
 		}
 		if arg == "-h" || arg == "--help" {
 			fmt.Println("Usage: dokpull [OPTIONS]")
@@ -1096,6 +1114,8 @@ func main() {
 			fmt.Println()
 			fmt.Println("Options:")
 			fmt.Println("  --deploy-all    Redeploy all applications regardless of image updates")
+			fmt.Println("  --headless      No TUI: pull, deploy, print a plain summary, exit.")
+			fmt.Println("                  Needs no terminal, so it is safe under cron/systemd.")
 			fmt.Println("  -h, --help      Show this help message")
 			fmt.Println()
 			fmt.Println("Environment variables:")
@@ -1124,9 +1144,63 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(initialModel(deployAll), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	m := initialModel(deployAll)
+	m.headless = headless
+
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if headless {
+		// Drop both the renderer and the input reader so the run needs no TTY
+		// at all — otherwise Bubble Tea tries to open /dev/tty and fails where
+		// cron has given us no terminal.
+		opts = []tea.ProgramOption{tea.WithoutRenderer(), tea.WithInput(nil)}
+	}
+
+	final, err := tea.NewProgram(m, opts...).Run()
+	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+	if fm, ok := final.(model); ok && headless {
+		os.Exit(reportHeadless(fm))
+	}
+}
+
+// reportHeadless prints the report a headless run owes its log — the TUI table
+// never rendered — and returns the process exit code. Pull and deploy failures
+// become a non-zero exit so cron or systemd actually notices them; a run that
+// finds nothing to update is a success, not a failure.
+func reportHeadless(m model) int {
+	if m.err != nil {
+		fmt.Printf("dokpull: failed to load services: %v\n", m.err)
+		return 1
+	}
+
+	updated, deployed, failures := 0, 0, 0
+	for _, svc := range m.services {
+		for _, img := range svc.Images {
+			switch {
+			case img.PullStatus == StatusError:
+				failures++
+				fmt.Printf("pull-failed    %s (%s): %s\n", img.Image, svc.Name, img.Error)
+			case img.Updated:
+				updated++
+				fmt.Printf("updated        %s (%s) %s -> %s\n", img.Image, svc.Name, img.OldSHA, img.NewSHA)
+			}
+		}
+		switch svc.DeployStatus {
+		case DeployTriggered:
+			deployed++
+			fmt.Printf("redeployed     %s\n", svc.Name)
+		case DeployFailed:
+			failures++
+			fmt.Printf("deploy-failed  %s\n", svc.Name)
+		}
+	}
+
+	fmt.Printf("dokpull: %d image(s) updated, %d redeploy(s) triggered, %d failure(s)\n",
+		updated, deployed, failures)
+	if failures > 0 {
+		return 1
+	}
+	return 0
 }
