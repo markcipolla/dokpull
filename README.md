@@ -69,7 +69,20 @@ This will:
 
 ```
 --deploy-all    Redeploy all services, even if their images haven't changed
+--headless      No TUI: pull, deploy, print a plain summary, exit
 -h, --help      Show help
+```
+
+### Running on a schedule
+
+The TUI is the point when you're watching, but it needs a terminal and it waits
+on `q` when it's finished — so a cron job would either fail to start or hang.
+`--headless` drops the renderer and the input reader, prints one line per
+updated image and triggered redeploy, and exits as soon as the work lands. It
+exits non-zero if a pull or a deploy failed, so your scheduler notices:
+
+```sh
+17 4 * * * DOKPLOY_URL=... DOKPLOY_API_KEY=... /path/to/dokpull --headless >> ~/dokpull.log 2>&1
 ```
 
 ### Keyboard Controls

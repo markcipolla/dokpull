@@ -983,3 +983,112 @@ func TestRenderHLine(t *testing.T) {
 		t.Error("renderHLine should contain horizontal line characters")
 	}
 }
+
+// --- headless mode tests ---
+
+// hasQuit reports whether any cmd in the slice actually yields a tea.QuitMsg.
+func hasQuit(cmds []tea.Cmd) bool {
+	for _, c := range cmds {
+		if c == nil {
+			continue
+		}
+		if _, ok := c().(tea.QuitMsg); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func TestQuitWhenDone_HeadlessAndDone(t *testing.T) {
+	m := initialModel(false)
+	m.headless = true
+	m.phase = "done"
+	if !hasQuit(m.quitWhenDone(nil)) {
+		t.Error("quitWhenDone() did not queue tea.Quit; a headless run would hang on the done screen")
+	}
+}
+
+func TestQuitWhenDone_HeadlessNotDoneYet(t *testing.T) {
+	m := initialModel(false)
+	m.headless = true
+	for _, phase := range []string{"loading", "pulling", "deploying"} {
+		m.phase = phase
+		if hasQuit(m.quitWhenDone(nil)) {
+			t.Errorf("quitWhenDone() queued tea.Quit during %q; that would abandon the run mid-flight", phase)
+		}
+	}
+}
+
+func TestQuitWhenDone_InteractiveStaysOpen(t *testing.T) {
+	m := initialModel(false)
+	m.phase = "done"
+	if hasQuit(m.quitWhenDone(nil)) {
+		t.Error("quitWhenDone() queued tea.Quit without --headless; the interactive done screen must wait for q")
+	}
+}
+
+func TestQuitWhenDone_PreservesExistingCmds(t *testing.T) {
+	m := initialModel(false)
+	m.headless = true
+	m.phase = "done"
+	existing := tea.Cmd(func() tea.Msg { return allDoneMsg{} })
+	got := m.quitWhenDone([]tea.Cmd{existing})
+	if len(got) != 2 {
+		t.Fatalf("quitWhenDone() returned %d cmds, want 2 (the original plus Quit)", len(got))
+	}
+	if !hasQuit(got) {
+		t.Error("quitWhenDone() dropped tea.Quit when cmds were already queued")
+	}
+}
+
+func TestReportHeadless_CleanRunExitsZero(t *testing.T) {
+	m := initialModel(false)
+	m.services = []ServiceState{
+		{Name: "web", Images: []ImageInfo{{Image: "nginx", PullStatus: StatusComplete}}},
+	}
+	if code := reportHeadless(m); code != 0 {
+		t.Errorf("reportHeadless() = %d, want 0 (nothing updated is still a success)", code)
+	}
+}
+
+func TestReportHeadless_UpdateAndDeployExitsZero(t *testing.T) {
+	m := initialModel(false)
+	m.services = []ServiceState{{
+		Name:         "web",
+		Images:       []ImageInfo{{Image: "nginx", PullStatus: StatusComplete, Updated: true, OldSHA: "aaa", NewSHA: "bbb"}},
+		DeployStatus: DeployTriggered,
+	}}
+	if code := reportHeadless(m); code != 0 {
+		t.Errorf("reportHeadless() = %d, want 0 for a successful update + redeploy", code)
+	}
+}
+
+func TestReportHeadless_PullErrorExitsNonZero(t *testing.T) {
+	m := initialModel(false)
+	m.services = []ServiceState{
+		{Name: "web", Images: []ImageInfo{{Image: "nginx", PullStatus: StatusError, Error: "no such host"}}},
+	}
+	if code := reportHeadless(m); code == 0 {
+		t.Error("reportHeadless() = 0 despite a failed pull; cron would never notice")
+	}
+}
+
+func TestReportHeadless_DeployFailureExitsNonZero(t *testing.T) {
+	m := initialModel(false)
+	m.services = []ServiceState{{
+		Name:         "web",
+		Images:       []ImageInfo{{Image: "nginx", PullStatus: StatusComplete, Updated: true}},
+		DeployStatus: DeployFailed,
+	}}
+	if code := reportHeadless(m); code == 0 {
+		t.Error("reportHeadless() = 0 despite a failed deploy; cron would never notice")
+	}
+}
+
+func TestReportHeadless_LoadErrorExitsNonZero(t *testing.T) {
+	m := initialModel(false)
+	m.err = fmt.Errorf("dokploy unreachable")
+	if code := reportHeadless(m); code == 0 {
+		t.Error("reportHeadless() = 0 despite failing to load services")
+	}
+}
